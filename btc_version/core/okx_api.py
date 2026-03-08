@@ -66,25 +66,12 @@ class OKXClient:
             positions = self.exchange.fetch_positions([symbol])
             
             for pos in positions:
-                # CCXT返回的symbol格式可能是 SOL/USDT:USDT
-                pos_symbol = pos.get('symbol', '')
-                normalized_pos = pos_symbol.replace('/', '-').replace(':USDT', '-SWAP')
-                normalized_config = symbol.replace('/', '-').replace(':USDT', '-SWAP')
-                
-                if (normalized_pos == normalized_config or pos_symbol == symbol) and float(pos.get('contracts', 0)) != 0:
-                    side = pos.get('side', '')
-                    contracts = float(pos.get('contracts', 0))
-                    # 做空时contracts为正数，但pos为负数，需要保持一致
-                    if side == 'short':
-                        contracts = -contracts
+                if pos.get('symbol') == symbol and float(pos.get('contracts', 0)) != 0:
                     return {
-                        'pos': contracts,
+                        'pos': float(pos.get('contracts', 0)),
                         'avgPx': float(pos.get('entryPrice', 0)),
                         'markPx': float(pos.get('markPrice', 0)),
-                        'upl': float(pos.get('unrealizedPnl', 0)),
-                        'side': side,
-                        'leverage': float(pos.get('leverage', 0)),
-                        'notional': float(pos.get('notional', 0))
+                        'upl': float(pos.get('unrealizedPnl', 0))
                     }
             return None
         except Exception as e:
@@ -101,14 +88,7 @@ class OKXClient:
             short_pos = {"size": 0, "entry_price": 0}
             
             for pos in positions:
-                # CCXT返回的symbol格式可能是 SOL/USDT:USDT
-                # 需要兼容处理
-                pos_symbol = pos.get('symbol', '')
-                # 标准化symbol进行比较
-                normalized_pos = pos_symbol.replace('/', '-').replace(':USDT', '-SWAP')
-                normalized_config = symbol.replace('/', '-').replace(':USDT', '-SWAP')
-                
-                if normalized_pos == normalized_config or pos_symbol == symbol:
+                if pos.get('symbol') == symbol:
                     contracts = float(pos.get('contracts', 0))
                     side = pos.get('side', '')
                     entry = float(pos.get('entryPrice', 0))
