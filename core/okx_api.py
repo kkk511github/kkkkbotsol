@@ -109,9 +109,9 @@ class OKXClient:
                 normalized_config = symbol.replace('/', '-').replace(':USDT', '-SWAP')
                 
                 if normalized_pos == normalized_config or pos_symbol == symbol:
-                    contracts = float(pos.get('contracts', 0))
+                    contracts = float(pos.get('contracts', 0) or 0)
                     side = pos.get('side', '')
-                    entry = float(pos.get('entryPrice', 0))
+                    entry = float(pos.get('entryPrice', 0) or 0)
                     
                     if side == 'long' and contracts > 0:
                         long_pos = {"size": contracts, "entry_price": entry}
@@ -129,10 +129,10 @@ class OKXClient:
             symbol = symbol or config.SYMBOL
             ticker = self.exchange.fetch_ticker(symbol)
             return {
-                'last': float(ticker.get('last', 0)),
-                'bid': float(ticker.get('bid', 0)),
-                'ask': float(ticker.get('ask', 0)),
-                'volume': float(ticker.get('volume', 0))
+                'last': float(ticker.get('last', 0) or 0),
+                'bid': float(ticker.get('bid', 0) or 0),
+                'ask': float(ticker.get('ask', 0) or 0),
+                'volume': float(ticker.get('volume', 0) or 0)
             }
         except Exception as e:
             log_error(f"获取行情失败: {e}")

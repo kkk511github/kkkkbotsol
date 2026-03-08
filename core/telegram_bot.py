@@ -91,17 +91,17 @@ class TradingTelegramBot:
                 # 直接从API获取状态
                 long_pos, short_pos = self.client.get_position()
                 balance_data = self.client.get_account_balance()
-                total_eq = float(balance_data['data'][0]['totalEq']) if balance_data and 'data' in balance_data else 0
+                total_eq = float(balance_data['data'][0]['totalEq']) if balance_data and 'data' in balance_data and len(balance_data['data']) > 0 else 0
                 
-                long_size = float(long_pos.get('size', 0))
-                short_size = float(short_pos.get('size', 0))
+                long_size = float(long_pos.get('size', 0) or 0)
+                short_size = float(short_pos.get('size', 0) or 0)
                 
                 if long_size > 0:
                     position_str = f"做多 {long_size:.4f} SOL"
-                    entry_price = float(long_pos.get('entry_price', 0))
+                    entry_price = float(long_pos.get('entry_price', 0) or 0)
                 elif short_size > 0:
                     position_str = f"做空 {short_size:.4f} SOL"
-                    entry_price = float(short_pos.get('entry_price', 0))
+                    entry_price = float(short_pos.get('entry_price', 0) or 0)
                 else:
                     position_str = "空仓"
                     entry_price = 0
@@ -309,7 +309,7 @@ class TradingTelegramBot:
     async def _get_status_message(self) -> str:
         try:
             ticker = self.client.get_ticker(config.SYMBOL)
-            price = float(ticker['last'])
+            price = float(ticker.get('last', 0) or 0)
             
             return (
                 f"📊 *实时市场状态*\n\n"
@@ -326,20 +326,27 @@ class TradingTelegramBot:
         try:
             # 获取持仓 - 使用get_position获取多空分开的持仓
             long_pos, short_pos = self.client.get_position()
+            
+            # 确保持仓数据不为None
+            if long_pos is None:
+                long_pos = {"size": 0, "entry_price": 0}
+            if short_pos is None:
+                short_pos = {"size": 0, "entry_price": 0}
+            
             balance_data = self.client.get_account_balance()
-            balance = balance_data['data'][0]['availEq'] if balance_data and 'data' in balance_data else 0
-            total_eq = balance_data['data'][0]['totalEq'] if balance_data and 'data' in balance_data else 0
+            balance = balance_data['data'][0]['availEq'] if balance_data and 'data' in balance_data and len(balance_data['data']) > 0 else 0
+            total_eq = balance_data['data'][0]['totalEq'] if balance_data and 'data' in balance_data and len(balance_data['data']) > 0 else 0
             
             # 判断持仓状态
-            long_size = float(long_pos.get('size', 0))
-            short_size = float(short_pos.get('size', 0))
+            long_size = float(long_pos.get('size', 0) or 0)
+            short_size = float(short_pos.get('size', 0) or 0)
             
             if long_size == 0 and short_size == 0:
                 return (
                     f"📈 *持仓详情*\n\n"
                     f"💼 当前持仓: *空仓*\n"
-                    f"💰 可用余额: `${float(balance):.2f}`\n"
-                    f"💎 账户权益: `${float(total_eq):.2f}`\n"
+                    f"💰 可用余额: `${float(balance or 0):.2f}`\n"
+                    f"💎 账户权益: `${float(total_eq or 0):.2f}`\n"
                     f"⏰ 更新时间: `{datetime.now().strftime('%H:%M:%S')}`"
                 )
             
@@ -347,16 +354,18 @@ class TradingTelegramBot:
             if long_size > 0:
                 pos_side = "做多 📈"
                 pos_size = long_size
-                entry_price = float(long_pos.get('entry_price', 0))
+                entry_price = float(long_pos.get('entry_price', 0) or 0)
             # 有空头持仓
             else:
                 pos_side = "做空 📉"
                 pos_size = -short_size  # 显示为负数
-                entry_price = float(short_pos.get('entry_price', 0))
+                entry_price = float(short_pos.get('entry_price', 0) or 0)
             
             # 获取当前价格计算盈亏
             ticker = self.client.get_ticker(config.SYMBOL)
-            mark_price = float(ticker.get('last', 0))
+            if ticker is None:
+                ticker = {'last': 0}
+            mark_price = float(ticker.get('last', 0) or 0)
             
             # 计算未实现盈亏
             if long_size > 0:
@@ -364,7 +373,7 @@ class TradingTelegramBot:
             else:
                 pnl = (entry_price - mark_price) * short_size
             
-            margin_used = total_eq - balance
+            margin_used = (total_eq or 0) - (balance or 0)
             pnl_pct = (pnl / margin_used * 100) if margin_used > 0 else 0
             
             return (
@@ -374,8 +383,8 @@ class TradingTelegramBot:
                 f"💵 开仓价格: `${entry_price:.4f}`\n"
                 f"🏷️ 当前价格: `${mark_price:.4f}`\n"
                 f"💰 未实现盈亏: `${pnl:+.2f} ({pnl_pct:+.2f}%)`\n"
-                f"💎 账户权益: `${float(total_eq):.2f}`\n"
-                f"💵 可用余额: `${float(balance):.2f}`\n"
+                f"💎 账户权益: `${float(total_eq or 0):.2f}`\n"
+                f"💵 可用余额: `${float(balance or 0):.2f}`\n"
                 f"🔒 占用保证金: `${margin_used:.2f}`\n"
                 f"⏰ 更新时间: `{datetime.now().strftime('%H:%M:%S')}`"
             )
@@ -390,7 +399,7 @@ class TradingTelegramBot:
             
             # 获取账户信息
             balance_data = self.client.get_account_balance()
-            total_eq = float(balance_data['data'][0]['totalEq']) if balance_data and 'data' in balance_data else 0
+            total_eq = float(balance_data['data'][0]['totalEq']) if balance_data and 'data' in balance_data and len(balance_data['data']) > 0 else 0
             
             # 计算累计盈亏（从已实现盈亏的交易中）
             realized_pnl = sum(t.get('pnl', 0) for t in all_trades if t.get('pnl', 0) != 0)

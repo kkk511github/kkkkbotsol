@@ -148,7 +148,9 @@ class LiveTrader:
 
     def _get_equity(self) -> float:
         account_balance = self.client.get_account_balance()
-        return float(account_balance["data"][0]["availEq"])
+        if account_balance and 'data' in account_balance and len(account_balance['data']) > 0:
+            return float(account_balance["data"][0].get("availEq", 0) or 0)
+        return 0.0
 
     def _sync_after_trade(self):
         pos_qty2, entry_price2 = self._get_net_position()
@@ -169,9 +171,9 @@ class LiveTrader:
             return 0.0, 0.0
 
         if long_pos["size"] > 0:
-            return float(long_pos["size"]), float(long_pos["entry_price"])
+            return float(long_pos["size"]), float(long_pos.get("entry_price", 0) or 0)
         if short_pos["size"] > 0:
-            return -float(short_pos["size"]), float(short_pos["entry_price"])
+            return -float(short_pos["size"]), float(short_pos.get("entry_price", 0) or 0)
         return 0.0, 0.0
 
     def _get_signal_emoji(self, long_prob, short_prob):

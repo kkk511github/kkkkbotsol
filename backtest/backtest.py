@@ -72,22 +72,46 @@ class Backtester:
         # 直接使用5分钟数据，获取更多历史数据
         import pandas as pd
         
-        # 获取5分钟K线数据，最多1000根（API限制）
-        ohlcv = client.exchange.fetch_ohlcv(config.SYMBOL, '5m', limit=min(self.window, 1000))
-        df_5m = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        # 2周数据 = 14天 * 24小时 * 12根/小时 = 4032根K线
+        # OKX API限制每次最多1000根，需要分批获取
+        total_needed = min(self.window, 4032)  # 最多2周数据
+        all_ohlcv = []
+        
+        # 计算起始时间（2周前）
+        from datetime import datetime, timedelta
+        end_time = datetime.now()
+        
+        # 分批获取数据，每次最多1000根
+        while len(all_ohlcv) < total_needed:
+            limit = min(1000, total_needed - len(all_ohlcv))
+            since = int((end_time - timedelta(minutes=5*limit)).timestamp() * 1000)
+            
+            try:
+                ohlcv = client.exchange.fetch_ohlcv(config.SYMBOL, '5m', since=since, limit=limit)
+                if len(ohlcv) == 0:
+                    break
+                all_ohlcv = ohlcv + all_ohlcv  # 新数据在前面
+                end_time = datetime.fromtimestamp(ohlcv[0][0] / 1000)
+            except Exception as e:
+                log_error(f"获取数据失败: {e}")
+                break
+        
+        df_5m = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df_5m['timestamp'] = pd.to_datetime(df_5m['timestamp'], unit='ms')
         df_5m.set_index('timestamp', inplace=True)
+        df_5m = df_5m[~df_5m.index.duplicated(keep='first')]  # 去重
         
         # 重命名列为标准格式
         df_5m.columns = ['open', 'high', 'low', 'close', 'volume']
         
         # 为了兼容多周期特征工程，使用相同的5分钟数据作为所有周期
-        # 这样可以确保数据对齐，不会丢失行
         all_data = {
             '5m': df_5m.copy(),
             '15m': df_5m.copy(),
             '1H': df_5m.copy()
         }
+        
+        log_info(f"成功获取 {len(df_5m)} 根K线数据，时间范围: {df_5m.index[0]} 到 {df_5m.index[-1]}")
         
         return all_data, reward_risk
 
@@ -205,16 +229,58 @@ class Backtester:
     def _summary(self):
         pnl = self.balance - config.INITIAL_BALANCE
         drawdown = (self.balance - self.max_balance) / self.max_balance
+        
+        # 计算胜率
+        wins = 0
+        losses = 0
+        win_pnl = 0
+        loss_pnl = 0
+        
+        for i in range(len(self.trade_log)):
+            timestamp, action, price, position, balance = self.trade_log[i]
+            # 平仓交易（包含"平仓"或"反向平仓"）
+            if "平仓" in action and i > 0:
+                # 找到对应的开仓记录
+                for j in range(i-1, -1, -1):
+                    prev_timestamp, prev_action, prev_price, prev_position, prev_balance = self.trade_log[j]
+                    if "开多" in prev_action or "开空" in prev_action:
+                        # 计算盈亏
+                        if "开多" in prev_action:
+                            trade_pnl = (price - prev_price) * abs(prev_position)
+                        else:  # 开空
+                            trade_pnl = (prev_price - price) * abs(prev_position)
+                        
+                        # 扣除手续费
+                        trade_pnl -= abs(prev_position * price * self.fee_rate * 2)  # 开仓+平仓手续费
+                        
+                        if trade_pnl > 0:
+                            wins += 1
+                            win_pnl += trade_pnl
+                        else:
+                            losses += 1
+                            loss_pnl += trade_pnl
+                        break
+        
+        total_closed = wins + losses
+        win_rate = (wins / total_closed * 100) if total_closed > 0 else 0
+        profit_factor = abs(win_pnl / loss_pnl) if loss_pnl != 0 else 0
 
         log_info("回测完成 ✅")
         log_info(f"最终资金: {self.balance:.2f} USDT")
         log_info(f"累计收益: {pnl:.2f} USDT ({pnl / config.INITIAL_BALANCE * 100:.2f}%)")
         log_info(f"最大回撤: {drawdown * 100:.2f}%")
         log_info(f"交易次数: {len(self.trade_log)}")
+        log_info(f"已平仓交易: {total_closed}")
+        log_info(f"盈利次数: {wins}")
+        log_info(f"亏损次数: {losses}")
+        log_info(f"胜率: {win_rate:.1f}%")
+        log_info(f"盈利总额: {win_pnl:.2f} USDT")
+        log_info(f"亏损总额: {loss_pnl:.2f} USDT")
+        log_info(f"盈亏比: {profit_factor:.2f}")
         log_info(f"交易记录示例: {self.trade_log[-5:]}")
-        self.dump_trade_log_to_csv(pnl,drawdown)
+        self.dump_trade_log_to_csv(pnl,drawdown, win_rate, wins, losses, win_pnl, loss_pnl, profit_factor)
 
-    def dump_trade_log_to_csv(self,pnl, drawdown):
+    def dump_trade_log_to_csv(self,pnl, drawdown, win_rate=0, wins=0, losses=0, win_pnl=0, loss_pnl=0, profit_factor=0):
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         backtest_log_path = os.path.join(LOGS_DIR, f"backtest_{self.interval}_{ts}.csv")
         with open(backtest_log_path, "w", newline="") as f:
@@ -241,6 +307,12 @@ class Backtester:
                 "Trade Count",
                 len(self.trade_log)
             ])
+            writer.writerow(["Win Rate (%)", round(win_rate, 2)])
+            writer.writerow(["Wins", wins])
+            writer.writerow(["Losses", losses])
+            writer.writerow(["Win PnL", round(win_pnl, 2)])
+            writer.writerow(["Loss PnL", round(loss_pnl, 2)])
+            writer.writerow(["Profit Factor", round(profit_factor, 2)])
 
 
 
