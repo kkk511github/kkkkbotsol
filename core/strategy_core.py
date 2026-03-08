@@ -35,12 +35,20 @@ class StrategyCore:
         self.position = 0.0
         self.entry_price = 0.0
         self.hold_bars = 0
+        self.peak_price = 0.0  # 移动止损：跟踪最高价格
+        self.trailing_stop_pct = 0.03  # 移动止损回撤比例 3%
+        self.break_even_pct = 0.02  # 保本止损：盈利2%后启动
 
     def set_state(self, position: float, entry_price: float, hold_bars: int = None):
         self.position = float(position)
         self.entry_price = float(entry_price)
         if hold_bars is not None:
             self.hold_bars = int(hold_bars)
+        # 重置移动止损跟踪价格
+        if position == 0:
+            self.peak_price = 0.0
+        elif self.peak_price == 0.0:
+            self.peak_price = float(entry_price)
 
     def get_state(self):
         return self.position, self.entry_price, self.hold_bars
@@ -63,15 +71,26 @@ class StrategyCore:
         pos = float(self.position)
 
         # ======================
-        # 1) 持仓 -> 止盈止损
+        # 1) 持仓 -> 止盈止损（含移动止损和保本止损）
         # ======================
         if pos != 0:
             pnl_pct = (price - self.entry_price) / self.entry_price if pos > 0 else (self.entry_price - price) / self.entry_price
+            
+            # 更新最高价格（用于移动止损）
+            if pos > 0:  # 做多
+                if price > self.peak_price:
+                    self.peak_price = price
+            else:  # 做空
+                if price < self.peak_price or self.peak_price == 0:
+                    self.peak_price = price
+            
+            # 1.1 固定止盈止损
             if pnl_pct >= self.take_profit or pnl_pct <= -self.stop_loss:
                 delta_qty = -pos
                 self.position = 0.0
                 self.entry_price = 0.0
                 self.hold_bars = 0
+                self.peak_price = 0.0
                 return {
                     "action": "CLOSE",
                     "delta_qty": delta_qty,
@@ -79,6 +98,29 @@ class StrategyCore:
                     "target_position": 0.0,
                     "reason": "TP/SL",
                 }
+            
+            # 1.2 移动止损：盈利超过保本阈值后启动
+            if pnl_pct >= self.break_even_pct:
+                # 计算从最高点的回撤
+                if pos > 0:  # 做多
+                    drawdown_from_peak = (self.peak_price - price) / self.peak_price
+                else:  # 做空
+                    drawdown_from_peak = (price - self.peak_price) / self.peak_price
+                
+                # 如果回撤超过阈值，触发移动止损
+                if drawdown_from_peak >= self.trailing_stop_pct:
+                    delta_qty = -pos
+                    self.position = 0.0
+                    self.entry_price = 0.0
+                    self.hold_bars = 0
+                    self.peak_price = 0.0
+                    return {
+                        "action": "CLOSE",
+                        "delta_qty": delta_qty,
+                        "target_ratio": 0.0,
+                        "target_position": 0.0,
+                        "reason": "TrailingStop",
+                    }
 
         # ======================
         # 2) 计算目标仓位档位
@@ -103,6 +145,7 @@ class StrategyCore:
                 self.position = target_position
                 self.entry_price = price
                 self.hold_bars = 0
+                self.peak_price = price  # 初始化移动止损跟踪价格
                 return {
                     "action": "OPEN",
                     "delta_qty": target_position,
