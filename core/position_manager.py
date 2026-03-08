@@ -31,14 +31,23 @@ class PositionManager:
         )
         return max(0, min(score, 1))
 
-    # 最终目标仓位比例
+    # 最终目标仓位比例 - 简化版，直接使用信号强度
     def calculate_target_ratio(self, prob, money_flow_ratio, volatility,reward_risk=1.0):
-        signal_strength = max(0, prob - 0.5) * 2
-        kelly_weight = self.kelly_fraction(prob,reward_risk)
-        multi_factor = self.multi_factor_score(prob, money_flow_ratio, volatility)
-        blended_ratio = self.min_ratio + signal_strength * (self.max_ratio - self.min_ratio)
-        final_ratio = blended_ratio * kelly_weight * multi_factor
-        return round(final_ratio, 4)
+        # 信号强度：从阈值到1.0之间线性映射
+        # 做多阈值0.70，做空阈值0.30（因为做空概率=1-0.70=0.30）
+        
+        if prob > 0.5:  # 做多方向
+            threshold = 0.70
+            signal_strength = max(0, (prob - threshold) / (1.0 - threshold))
+        else:  # 做空方向
+            threshold = 0.30  # 做空阈值
+            signal_strength = max(0, (threshold - prob) / (threshold - 0.0))
+        
+        # 直接使用线性映射，不考虑复杂的Kelly和多因子
+        final_ratio = self.min_ratio + signal_strength * (self.max_ratio - self.min_ratio)
+        
+        # 限制在合理范围内
+        return round(max(self.min_ratio, min(final_ratio, self.max_ratio)), 4)
 
     # 实际调仓金额（按最小调整单位控制）
     def calculate_adjust_amount(self, account_balance, current_position_value, target_ratio):

@@ -1,5 +1,6 @@
 # core/strategy_core.py
 import numpy as np
+from config import config
 
 class StrategyCore:
 
@@ -89,13 +90,16 @@ class StrategyCore:
         elif short_prob > self.threshold_short:
             target_ratio = -float(self.pm.calculate_target_ratio(short_prob, money_flow_ratio, volatility, self.reward_risk))
 
-        target_position = target_ratio * equity / price
+        # 计算目标名义金额（考虑杠杆）
+        # target_ratio 是占本金的比例，乘以杠杆得到名义仓位
+        target_notional = target_ratio * equity * config.LEVERAGE
+        target_position = target_notional / price
 
         # ======================
         # 3) 空仓 -> 只允许开仓
         # ======================
         if pos == 0:
-            if abs(target_position * price) >= self.min_adjust_amount and target_position != 0:
+            if abs(target_notional) >= self.min_adjust_amount and target_position != 0:
                 self.position = target_position
                 self.entry_price = price
                 self.hold_bars = 0
@@ -133,25 +137,23 @@ class StrategyCore:
         same_direction = (pos > 0 and target_position > 0) or (pos < 0 and target_position < 0)
 
         if same_direction:
-            diff_ratio = (target_position - pos) / max(abs(pos), 1e-9)
+            # 计算仓位差异（币的数量）
+            delta = target_position - pos
+            
+            # 限制单次调仓幅度
+            max_delta = self.max_rebalance_ratio * abs(pos)
+            delta = float(np.clip(delta, -max_delta, max_delta))
 
-            if abs(diff_ratio) >= self.add_threshold:
-                delta = diff_ratio * pos
-                delta = float(np.clip(
-                    delta,
-                    -self.max_rebalance_ratio * abs(pos),
-                    self.max_rebalance_ratio * abs(pos)
-                ))
-
-                if abs(delta * price) >= self.min_adjust_amount:
-                    self.position = pos + delta
-                    return {
-                        "action": "REBALANCE",
-                        "delta_qty": delta,
-                        "target_ratio": target_ratio,
-                        "target_position": target_position,
-                        "reason": "SameDirRebalance",
-                    }
+            # 检查是否满足最小调整金额
+            if abs(delta * price) >= self.min_adjust_amount:
+                self.position = pos + delta
+                return {
+                    "action": "REBALANCE",
+                    "delta_qty": delta,
+                    "target_ratio": target_ratio,
+                    "target_position": target_position,
+                    "reason": "SameDirRebalance",
+                }
 
             return {
                 "action": "HOLD",
