@@ -17,6 +17,8 @@ class StrategyCore:
         max_rebalance_ratio: float = 0.3,
         min_adjust_amount: float = 10.0,
         reward_risk: float = 1.0,
+        strong_signal_threshold: float = 0.85,
+        leverage: int = 3,
     ):
         self.pm = position_manager
 
@@ -29,15 +31,16 @@ class StrategyCore:
         self.add_threshold = float(add_threshold)
         self.max_rebalance_ratio = float(max_rebalance_ratio)
         self.min_adjust_amount = float(min_adjust_amount)
-
         self.reward_risk = float(reward_risk)
+        self.strong_signal_threshold = float(strong_signal_threshold)
+        self.leverage = int(leverage)
 
         self.position = 0.0
         self.entry_price = 0.0
         self.hold_bars = 0
         self.peak_price = 0.0  # 移动止损：跟踪最高价格
-        self.trailing_stop_pct = 0.03  # 移动止损回撤比例 3%
-        self.break_even_pct = 0.02  # 保本止损：盈利2%后启动
+        self.trailing_stop_pct = 0.015  # 移动止损回撤比例 1.5%
+        self.break_even_pct = 0.03  # 保本止损：盈利3%保证金后启动
 
     def set_state(self, position: float, entry_price: float, hold_bars: int = None):
         self.position = float(position)
@@ -74,7 +77,9 @@ class StrategyCore:
         # 1) 持仓 -> 止盈止损（含移动止损和保本止损）
         # ======================
         if pos != 0:
-            pnl_pct = (price - self.entry_price) / self.entry_price if pos > 0 else (self.entry_price - price) / self.entry_price
+            price_pnl_pct = (price - self.entry_price) / self.entry_price if pos > 0 else (self.entry_price - price) / self.entry_price
+            
+            margin_pnl_pct = price_pnl_pct * self.leverage
             
             # 更新最高价格（用于移动止损）
             if pos > 0:  # 做多
@@ -84,8 +89,8 @@ class StrategyCore:
                 if price < self.peak_price or self.peak_price == 0:
                     self.peak_price = price
             
-            # 1.1 固定止盈止损
-            if pnl_pct >= self.take_profit or pnl_pct <= -self.stop_loss:
+            # 1.1 固定止盈止损（基于保证金盈亏百分比）
+            if margin_pnl_pct >= self.take_profit or margin_pnl_pct <= -self.stop_loss:
                 delta_qty = -pos
                 self.position = 0.0
                 self.entry_price = 0.0
@@ -100,8 +105,8 @@ class StrategyCore:
                 }
             
             # 1.2 移动止损：盈利超过保本阈值后启动
-            if pnl_pct >= self.break_even_pct:
-                # 计算从最高点的回撤
+            if margin_pnl_pct >= self.break_even_pct:
+                # 计算从最高点的回撤（价格回撤）
                 if pos > 0:  # 做多
                     drawdown_from_peak = (self.peak_price - price) / self.peak_price
                 else:  # 做空
@@ -134,7 +139,7 @@ class StrategyCore:
 
         # 计算目标名义金额（考虑杠杆）
         # target_ratio 是占本金的比例，乘以杠杆得到名义仓位
-        target_notional = target_ratio * equity * config.LEVERAGE
+        target_notional = target_ratio * equity * self.leverage
         target_position = target_notional / price
 
         # ======================
@@ -166,6 +171,27 @@ class StrategyCore:
         # ======================
         self.hold_bars += 1
         if self.hold_bars < self.min_hold_bars:
+            # 检查是否有强烈的反向信号
+            strong_reverse = False
+            if pos > 0 and short_prob >= self.strong_signal_threshold:
+                strong_reverse = True
+            elif pos < 0 and long_prob >= self.strong_signal_threshold:
+                strong_reverse = True
+            
+            # 如果有强烈反向信号，提前平仓
+            if strong_reverse:
+                delta_qty = -pos
+                self.position = 0.0
+                self.entry_price = 0.0
+                self.hold_bars = 0
+                return {
+                    "action": "CLOSE",
+                    "delta_qty": delta_qty,
+                    "target_ratio": 0.0,
+                    "target_position": 0.0,
+                    "reason": "StrongReverseSignal",
+                }
+            
             return {
                 "action": "HOLD",
                 "delta_qty": 0.0,

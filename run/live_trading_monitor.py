@@ -63,6 +63,8 @@ class LiveTrader:
             max_rebalance_ratio=self.MAX_REBALANCE_RATIO,
             min_adjust_amount=self.MIN_ADJUST_AMOUNT,
             reward_risk=float(self.reward_risk),
+            strong_signal_threshold=0.85,
+            leverage=config.LEVERAGE,
         )
 
     async def start_telegram(self):
@@ -97,7 +99,9 @@ class LiveTrader:
             "symbol": config.SYMBOL,
             "leverage": config.LEVERAGE,
             "position": self.current_position,
-            "entry_price": self.entry_price
+            "entry_price": self.entry_price,
+            "hold_bars": self.hold_bars,
+            "min_hold_bars": self.MIN_HOLD_BARS
         }
 
     def _load_reward_risk(self):
@@ -264,6 +268,9 @@ class LiveTrader:
             money_flow_ratio=money_flow_ratio,
             volatility=volatility,
         )
+
+        # 同步 hold_bars 到 LiveTrader
+        _, _, self.hold_bars = self.core.get_state()
 
         action = out["action"]
         delta = float(out["delta_qty"])

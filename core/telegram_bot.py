@@ -336,6 +336,58 @@ class TradingTelegramBot:
             ]
             await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
             
+    async def _get_status_message(self) -> str:
+        try:
+            ticker = self.client.get_ticker(config.SYMBOL)
+            price = float(ticker.get('last', 0) or 0)
+            
+            # 获取持仓信息
+            long_pos, short_pos = self.client.get_position()
+            long_size = float(long_pos.get('size', 0) or 0)
+            short_size = float(short_pos.get('size', 0) or 0)
+            
+            # 获取账户信息
+            balance_data = self.client.get_account_balance()
+            total_eq = float(balance_data['data'][0]['totalEq']) if balance_data and 'data' in balance_data and len(balance_data['data']) > 0 else 0
+            
+            # 判断持仓状态
+            if long_size > 0:
+                position_str = f"做多 {long_size:.4f} SOL"
+                entry_price = float(long_pos.get('entry_price', 0) or 0)
+            elif short_size > 0:
+                position_str = f"做空 {short_size:.4f} SOL"
+                entry_price = float(short_pos.get('entry_price', 0) or 0)
+            else:
+                position_str = "空仓"
+                entry_price = 0
+            
+            # 获取最小持有期信息
+            hold_bars_info = ""
+            if self.trader:
+                try:
+                    status = self.trader.get_system_status()
+                    hold_bars = status.get('hold_bars', 0)
+                    min_hold_bars = status.get('min_hold_bars', 32)
+                    if long_size > 0 or short_size > 0:
+                        hold_bars_info = f"\n⏱️ 最小持有期: {hold_bars}/{min_hold_bars} 根K线"
+                except:
+                    pass
+            
+            return (
+                f"📊 *实时市场状态*\n\n"
+                f"💎 交易品种: `{config.SYMBOL}`\n"
+                f"💰 当前价格: `${price:.4f}`\n"
+                f"📈 杠杆倍数: `{config.LEVERAGE}x`\n"
+                f"💼 当前持仓: {position_str}\n"
+                f"💵 入场价格: `${entry_price:.4f}`\n"
+                f"💎 账户权益: `${total_eq:.2f}`"
+                f"{hold_bars_info}\n\n"
+                f"🤖 系统状态: 🟢 运行中"
+            )
+        except Exception as e:
+            logger.error(f"获取状态消息失败: {e}")
+            return f"❌ 获取状态失败: {str(e)}"
+            
     async def _get_realtime_signal(self) -> str:
         try:
             ticker = self.client.get_ticker(config.SYMBOL)
@@ -429,7 +481,14 @@ class TradingTelegramBot:
             else:
                 pnl = (entry_price - mark_price) * short_size
             
-            margin_used = (total_eq or 0) - (balance or 0)
+            # 计算实际占用保证金（考虑杠杆）
+            if long_size > 0:
+                margin_used = (long_size * entry_price) / config.LEVERAGE
+            else:
+                margin_used = (short_size * entry_price) / config.LEVERAGE
+            
+            # 确保保证金不为零
+            margin_used = max(margin_used, 0.0001)
             pnl_pct = (pnl / margin_used * 100) if margin_used > 0 else 0
             
             return (

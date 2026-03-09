@@ -59,6 +59,8 @@ class Backtester:
             max_rebalance_ratio=config.MAX_REBALANCE_RATIO,
             min_adjust_amount=float(config.MIN_ADJUST_AMOUNT),
             reward_risk=float(self.reward_risk),
+            strong_signal_threshold=0.85,
+            leverage=config.LEVERAGE,
         )
 
     def _load_data(self):
@@ -69,49 +71,55 @@ class Backtester:
         rr_estimator.batch_update(trades)
         reward_risk = rr_estimator.estimate()
 
-        # 直接使用5分钟数据，获取更多历史数据
+        # 真实多周期数据获取
         import pandas as pd
         
-        # 2周数据 = 14天 * 24小时 * 12根/小时 = 4032根K线
-        # OKX API限制每次最多1000根，需要分批获取
-        total_needed = min(self.window, 4032)  # 最多2周数据
-        all_ohlcv = []
-        
-        # 计算起始时间（2周前）
-        from datetime import datetime, timedelta
-        end_time = datetime.now()
+        # 1个月数据计算
+        # 5m: 1月 = 30天 * 24小时 * 12根/小时 = 8640根
+        # 15m: 1月 = 30天 * 24小时 * 4根/小时 = 2880根
+        # 1H: 1月 = 30天 * 24根/天 = 720根
         
         # 分批获取数据，每次最多1000根
-        while len(all_ohlcv) < total_needed:
-            limit = min(1000, total_needed - len(all_ohlcv))
-            since = int((end_time - timedelta(minutes=5*limit)).timestamp() * 1000)
+        def fetch_data(interval, minutes_per_bar, total_needed):
+            all_ohlcv = []
+            end_time = pd.Timestamp.now()
             
-            try:
-                ohlcv = client.exchange.fetch_ohlcv(config.SYMBOL, '5m', since=since, limit=limit)
-                if len(ohlcv) == 0:
+            while len(all_ohlcv) < total_needed:
+                limit = min(1000, total_needed - len(all_ohlcv))
+                since = int((end_time - pd.Timedelta(minutes=minutes_per_bar*limit)).timestamp() * 1000)
+                
+                try:
+                    ohlcv = client.exchange.fetch_ohlcv(config.SYMBOL, interval, since=since, limit=limit)
+                    if len(ohlcv) == 0:
+                        break
+                    all_ohlcv = ohlcv + all_ohlcv  # 新数据在前面
+                    end_time = pd.Timestamp(ohlcv[0][0], unit='ms')
+                except Exception as e:
+                    log_error(f"获取{interval}数据失败: {e}")
                     break
-                all_ohlcv = ohlcv + all_ohlcv  # 新数据在前面
-                end_time = datetime.fromtimestamp(ohlcv[0][0] / 1000)
-            except Exception as e:
-                log_error(f"获取数据失败: {e}")
-                break
+            
+            df = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            df.set_index('timestamp', inplace=True)
+            df = df[~df.index.duplicated(keep='first')]  # 去重
+            df.columns = ['open', 'high', 'low', 'close', 'volume']
+            return df
         
-        df_5m = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        df_5m['timestamp'] = pd.to_datetime(df_5m['timestamp'], unit='ms')
-        df_5m.set_index('timestamp', inplace=True)
-        df_5m = df_5m[~df_5m.index.duplicated(keep='first')]  # 去重
+        # 获取各周期数据
+        df_5m = fetch_data('5m', 5, 8640)  # 1个月
+        df_15m = fetch_data('15m', 15, 2880)  # 1个月
+        df_1h = fetch_data('1h', 60, 720)  # 1个月
         
-        # 重命名列为标准格式
-        df_5m.columns = ['open', 'high', 'low', 'close', 'volume']
-        
-        # 为了兼容多周期特征工程，使用相同的5分钟数据作为所有周期
         all_data = {
-            '5m': df_5m.copy(),
-            '15m': df_5m.copy(),
-            '1H': df_5m.copy()
+            '5m': df_5m,
+            '15m': df_15m,
+            '1H': df_1h
         }
         
-        log_info(f"成功获取 {len(df_5m)} 根K线数据，时间范围: {df_5m.index[0]} 到 {df_5m.index[-1]}")
+        log_info(f"成功获取数据:")
+        log_info(f"  5m: {len(df_5m)} 根K线, 时间范围: {df_5m.index[0]} 到 {df_5m.index[-1]}")
+        log_info(f"  15m: {len(df_15m)} 根K线, 时间范围: {df_15m.index[0]} 到 {df_15m.index[-1]}")
+        log_info(f"  1H: {len(df_1h)} 根K线, 时间范围: {df_1h.index[0]} 到 {df_1h.index[-1]}")
         
         return all_data, reward_risk
 
