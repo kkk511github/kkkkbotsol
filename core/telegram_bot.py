@@ -249,6 +249,7 @@ class TradingTelegramBot:
             keyboard = [
                 [InlineKeyboardButton(f"{status_emoji} {'停止交易' if status['running'] else '启动交易'}", 
                                       callback_data='toggle_trading')],
+                [InlineKeyboardButton("🔄 重启系统", callback_data='restart_system')],
                 [InlineKeyboardButton("🔙 返回主菜单", callback_data='main_menu')],
             ]
             msg = (f"⚙️ *系统控制面板*\n\n"
@@ -278,6 +279,7 @@ class TradingTelegramBot:
             keyboard = [
                 [InlineKeyboardButton(f"{status_emoji} {'停止交易' if self.trader.get_system_status()['running'] else '启动交易'}", 
                                       callback_data='toggle_trading')],
+                [InlineKeyboardButton("🔄 重启系统", callback_data='restart_system')],
                 [InlineKeyboardButton("🔙 返回主菜单", callback_data='main_menu')],
             ]
             msg = (f"⚙️ *系统控制面板*\n\n"
@@ -288,6 +290,24 @@ class TradingTelegramBot:
                    f"当前持仓: {status['position']:.4f}\n"
                    f"入场价格: ${status['entry_price']:.4f}")
             await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            
+        elif query.data == 'restart_system':
+            if not self.trader:
+                await query.edit_message_text("❌ 系统未连接", parse_mode='Markdown')
+                return
+            
+            await query.edit_message_text("🔄 *正在重启系统...*", parse_mode='Markdown')
+            
+            import subprocess
+            import sys
+            
+            try:
+                subprocess.Popen([sys.executable] + sys.argv)
+                await query.edit_message_text("✅ *系统重启成功！*\n\n新进程已启动，旧进程即将退出。", parse_mode='Markdown')
+                await asyncio.sleep(2)
+                os._exit(0)
+            except Exception as e:
+                await query.edit_message_text(f"❌ *重启失败*\n\n错误: `{str(e)}`", parse_mode='Markdown')
             
         elif query.data == 'main_menu':
             status_msg = self._get_system_status()
