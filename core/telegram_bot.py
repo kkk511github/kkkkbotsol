@@ -62,6 +62,7 @@ class TradingTelegramBot:
         status_msg = self._get_system_status()
         keyboard = [
             [InlineKeyboardButton("📊 实时状态", callback_data='status')],
+            [InlineKeyboardButton("📡 实时信号", callback_data='realtime_signal')],
             [InlineKeyboardButton("💰 盈亏统计", callback_data='pnl_menu')],
             [InlineKeyboardButton("📈 持仓详情", callback_data='position')],
             [InlineKeyboardButton("📜 交易历史", callback_data='history')],
