@@ -193,14 +193,16 @@ class Backtester:
 
             elif action == "OPEN":
                 new_pos, _, _ = self.core.get_state()
-                self.balance -= abs(new_pos * price * self.fee_rate)
+                # 开仓时不扣除手续费，手续费在平仓时收取
+                # self.balance -= abs(new_pos * price * self.fee_rate)
 
                 act = "开多" if new_pos > 0 else "开空"
                 self.trade_log.append((row.name, act, price, new_pos, self.balance))
 
             elif action == "REBALANCE":
                 new_pos, _, _ = self.core.get_state()
-                self.balance -= abs(delta * price * self.fee_rate)
+                # 调仓时不扣除手续费，手续费在平仓时收取
+                # self.balance -= abs(delta * price * self.fee_rate)
 
                 act = "加多" if delta > 0 else "减多"
                 self.trade_log.append((row.name, act, price, new_pos, self.balance))
@@ -258,8 +260,8 @@ class Backtester:
                         else:  # 开空
                             trade_pnl = (prev_price - price) * abs(prev_position)
                         
-                        # 扣除手续费
-                        trade_pnl -= abs(prev_position * price * self.fee_rate * 2)  # 开仓+平仓手续费
+                        # 手续费已经在交易执行时扣除，这里不再重复计算
+                        # trade_pnl -= abs(prev_position * price * self.fee_rate * 2)  # 开仓+平仓手续费
                         
                         if trade_pnl > 0:
                             wins += 1

@@ -123,7 +123,7 @@ class DataCollector:
             log_info("未找到旧数据，重新获取")
             return None
 
-def collect_all_data(days=30):
+def collect_all_data(days=365):
     """收集所有周期的历史数据"""
     collector = DataCollector()
     
@@ -153,4 +153,4 @@ def collect_all_data(days=30):
     log_info(f"{'='*60}")
 
 if __name__ == '__main__':
-    collect_all_data(days=30)
+    collect_all_data(days=365)

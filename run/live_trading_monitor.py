@@ -366,30 +366,45 @@ class LiveTrader:
             return
 
 
-async def main():
+async def trading_loop(trader):
     POLL_SEC = config.POLL_SEC
-    client = OKXClient()
-    trader = LiveTrader(client)
-
-    # 启动Telegram Bot
-    await trader.start_telegram()
-
     log_info("🟢 [系统] 实盘交易系统已启动，开始监控市场...")
     log_info(f"[配置] 交易品种: {config.SYMBOL} | 杠杆: {config.LEVERAGE}x | 轮询间隔: {POLL_SEC}秒")
 
     while True:
         try:
-            # 检查系统是否运行
             if trader.running:
                 await trader.run_once_on_new_bar()
             else:
-                # 系统已停止，只更新状态，不执行交易
                 log_info("[系统] 交易系统已暂停，等待启动...")
         except Exception as e:
             log_error(f"[错误] 实盘循环异常: {e}")
             log_error(traceback.format_exc())
 
         await asyncio.sleep(int(POLL_SEC))
+
+
+async def main():
+    client = OKXClient()
+    trader = LiveTrader(client)
+
+    if trader.telegram_enabled:
+        try:
+            await trader.telegram.start()
+            log_info("[系统] Telegram Bot 已启动")
+        except Exception as e:
+            log_error(f"[系统] Telegram Bot 启动失败: {e}")
+            trader.telegram_enabled = False
+
+    trader.start_trading()
+
+    if trader.telegram_enabled and trader.telegram.application:
+        await asyncio.gather(
+            trader.telegram.application.updater.start_polling(drop_pending_updates=True),
+            trading_loop(trader)
+        )
+    else:
+        await trading_loop(trader)
 
 
 def run():

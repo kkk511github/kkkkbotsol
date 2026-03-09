@@ -48,8 +48,6 @@ class TradingTelegramBot:
         # 启动bot
         await self.application.initialize()
         await self.application.start()
-        # 启动轮询监听
-        await self.application.updater.start_polling(drop_pending_updates=True)
         logger.info("Telegram Bot 已启动")
         
     async def stop(self):
