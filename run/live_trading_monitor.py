@@ -36,6 +36,7 @@ class LiveTrader:
         self.current_position = 0.0
         self.entry_price = 0.0
         self.running = True  # 系统运行状态标志
+        self.last_signal = {}  # 存储最新信号
 
         # ===== 模型/特征=====
         feature_path = os.path.join(BASE_DIR, config.FEATURE_LIST_PATH) if "BASE_DIR" in globals() else config.FEATURE_LIST_PATH
@@ -227,6 +228,17 @@ class LiveTrader:
         log_info(f"[信号] 新K线 {bar_ts_display} | 价格: ${price:.4f} | 方向: {signal_direction} | "
                  f"做多: {long_prob*100:.1f}% | 做空: {short_prob*100:.1f}% | "
                  f"强度: {signal_strength} | 资金流: {money_flow_ratio:.3f} | 波动率: {volatility:.4f}")
+
+        # 更新最新信号
+        self.last_signal = {
+            'direction': '做多' if long_prob > short_prob else '做空' if short_prob > long_prob else '观望',
+            'long_prob': long_prob * 100,
+            'short_prob': short_prob * 100,
+            'strength': signal_strength,
+            'money_flow_ratio': money_flow_ratio,
+            'volatility': volatility,
+            'timestamp': bar_ts_display,
+        }
 
         pos_qty, entry_price = self._get_net_position()
         equity = self._get_equity()

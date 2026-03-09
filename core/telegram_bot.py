@@ -313,7 +313,8 @@ class TradingTelegramBot:
             status_msg = self._get_system_status()
             keyboard = [
                 [InlineKeyboardButton("📊 实时状态", callback_data='status')],
-                [InlineKeyboardButton("💰 盈亏统计", callback_data='pnl_menu')],
+                [InlineKeyboardButton("� 实时信号", callback_data='realtime_signal')],
+                [InlineKeyboardButton("� 盈亏统计", callback_data='pnl_menu')],
                 [InlineKeyboardButton("📈 持仓详情", callback_data='position')],
                 [InlineKeyboardButton("📜 交易历史", callback_data='history')],
                 [InlineKeyboardButton("⚙️ 系统控制", callback_data='system_control')],
@@ -326,21 +327,55 @@ class TradingTelegramBot:
                 parse_mode='Markdown'
             )
             
-    async def _get_status_message(self) -> str:
+        elif query.data == 'realtime_signal':
+            msg = await self._get_realtime_signal()
+            keyboard = [
+                [InlineKeyboardButton("🔄 刷新信号", callback_data='realtime_signal')],
+                [InlineKeyboardButton("🔙 返回主菜单", callback_data='main_menu')],
+            ]
+            await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            
+    async def _get_realtime_signal(self) -> str:
         try:
             ticker = self.client.get_ticker(config.SYMBOL)
             price = float(ticker.get('last', 0) or 0)
             
-            return (
-                f"📊 *实时市场状态*\n\n"
-                f"💎 交易品种: `{config.SYMBOL}`\n"
-                f"💰 当前价格: `${price:.4f}`\n"
-                f"📈 杠杆倍数: `{config.LEVERAGE}x`\n"
-                f"⏰ 更新时间: `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`\n\n"
-                f"🤖 系统状态: 🟢 运行中"
-            )
+            if self.trader and hasattr(self.trader, 'last_signal'):
+                signal = self.trader.last_signal
+                direction = signal.get('direction', '观望')
+                long_prob = signal.get('long_prob', 0)
+                short_prob = signal.get('short_prob', 0)
+                strength = signal.get('strength', '未知')
+                money_flow = signal.get('money_flow_ratio', 0)
+                volatility = signal.get('volatility', 0)
+                timestamp = signal.get('timestamp', datetime.now())
+                
+                direction_emoji = "📈" if direction == "做多" else "📉" if direction == "做空" else "➖"
+                strength_emoji = "💪" if strength == "强势" else "👍" if strength == "中等" else "👎"
+                
+                return (
+                    f"� *实时交易信号*\n\n"
+                    f"💎 交易品种: `{config.SYMBOL}`\n"
+                    f"💰 当前价格: `${price:.4f}`\n"
+                    f"📈 杠杆倍数: `{config.LEVERAGE}x`\n\n"
+                    f"📊 *信号分析*\n"
+                    f"方向: {direction_emoji} {direction}\n"
+                    f"做多概率: `{long_prob:.1f}%`\n"
+                    f"做空概率: `{short_prob:.1f}%`\n"
+                    f"信号强度: {strength_emoji} {strength}\n"
+                    f"资金流: `{money_flow:.3f}`\n"
+                    f"波动率: `{volatility:.4f}`\n\n"
+                    f"⏰ 更新时间: `{timestamp}`"
+                )
+            else:
+                return (
+                    f"📡 *实时交易信号*\n\n"
+                    f"💎 交易品种: `{config.SYMBOL}`\n"
+                    f"� 当前价格: `${price:.4f}`\n\n"
+                    f"⚠️ 信号数据暂未加载，请稍后刷新"
+                )
         except Exception as e:
-            return f"❌ 获取状态失败: {str(e)}"
+            return f"❌ 获取信号失败: {str(e)}"
             
     async def _get_position_message(self) -> str:
         try:
